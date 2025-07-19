@@ -1,51 +1,48 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { OpenAI } = require('openai');
+
 const app = express();
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Allow frontend (localhost:3000) to connect
-app.use(cors({
-  origin: 'http://localhost:3000',
-  methods: ['GET', 'POST'],
-  credentials: true
-}));
-
+app.use(cors({ origin: 'http://localhost:3000' }));
 app.use(express.json());
 
-app.post('/api/generate', (req, res) => {
+app.post('/api/generate', async (req, res) => {
   const { prompt } = req.body;
 
-  // For now, just respond with dummy JS code
-  const code = `
-    import * as THREE from 'https://cdn.skypack.dev/three';
+  try {
+    // STEP 1: Expand the user prompt into a detailed 3D scene description
+    const expandedPrompt = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: 'You are a creative scene designer for 3D graphics using Three.js.' },
+        { role: 'user', content: `User prompt: "${prompt}".\nExpand it into a highly detailed scene description with camera angle, lighting, environment, colors, and objects.` },
+      ],
+      temperature: 0.9,
+    });
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+    const detailedScene = expandedPrompt.choices[0].message.content;
 
-    const geometry = new THREE.BoxGeometry();
-    const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-    const cube = new THREE.Mesh(geometry, material);
-    scene.add(cube);
+    // STEP 2: Generate the actual Three.js code from the detailed description
+    const codeGen = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: 'You are a senior Three.js developer. Write only working JavaScript (ES6 module style) that renders a 3D scene using Three.js. Do not include any explanation.' },
+        { role: 'user', content: `Here is the scene description:\n${detailedScene}\n\nWrite a complete Three.js scene.` },
+      ],
+      temperature: 0.7,
+    });
 
-    const light = new THREE.PointLight(0xffffff, 1, 100);
-    light.position.set(10, 10, 10);
-    scene.add(light);
+    const code = codeGen.choices[0].message.content;
 
-    camera.position.z = 5;
+    res.json({ code, detailedScene });
 
-    function animate() {
-      requestAnimationFrame(animate);
-      cube.rotation.x += 0.01;
-      cube.rotation.y += 0.01;
-      renderer.render(scene, camera);
-    }
-
-    animate();
-  `;
-
-  res.json({ code });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate scene.' });
+  }
 });
 
 const PORT = 5000;
