@@ -86,15 +86,44 @@ app.post('/api/generate', async (req, res) => {
       responseMimeType: "application/json",
     };
 
-    const jsonResult = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: promptToJSON }] }],
-      generationConfig,
-      safetySettings,
-    });
+    const MAX_RETRIES = 3;
+    const BASE_DELAY = 1000; // 1 second
+    let retryCount = 0;
+    let jsonResult;
+    
+    while (retryCount < MAX_RETRIES) {
+      try {
+        jsonResult = await model.generateContent({
+          contents: [{ role: "user", parts: [{ text: promptToJSON }] }],
+          generationConfig,
+          safetySettings,
+        });
+        break;
+      } catch (err) {
+        if (err.message.includes('overloaded') || err.message.includes('quota')) {
+          retryCount++;
+          if (retryCount >= MAX_RETRIES) {
+            throw new Error('The model is currently overloaded. Please try again later.');
+          }
+          const delay = BASE_DELAY * Math.pow(2, retryCount);
+          console.log(`Model overloaded, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        throw err;
+      }
+    }
 
     const sceneDescriptionText = jsonResult.response.text();
-    const sceneDescription = JSON.parse(sceneDescriptionText);
-    console.log('Step 1 complete. Received JSON:', sceneDescription);
+    const cleanedText = cleanResponse(sceneDescriptionText);
+    
+    try {
+      const sceneDescription = JSON.parse(cleanedText);
+      console.log('Step 1 complete. Received JSON:', sceneDescription);
+    } catch (err) {
+      console.error('Failed to parse JSON response:', cleanedText);
+      throw new Error('The AI response could not be parsed as valid JSON. Please try again.');
+    }
 
 
     // --- STEP 2: Generate Three.js code from the structured JSON ---
@@ -119,10 +148,30 @@ app.post('/api/generate', async (req, res) => {
       **Three.js Code (ES6 Module Syntax):**
     `;
 
-    const codeResult = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: promptToCode }] }],
-      safetySettings,
-    });
+    retryCount = 0;
+    let codeResult;
+    
+    while (retryCount < MAX_RETRIES) {
+      try {
+        codeResult = await model.generateContent({
+          contents: [{ role: "user", parts: [{ text: promptToCode }] }],
+          safetySettings,
+        });
+        break;
+      } catch (err) {
+        if (err.message.includes('overloaded') || err.message.includes('quota')) {
+          retryCount++;
+          if (retryCount >= MAX_RETRIES) {
+            throw new Error('The model is currently overloaded. Please try again later.');
+          }
+          const delay = BASE_DELAY * Math.pow(2, retryCount);
+          console.log(`Model overloaded, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        throw err;
+      }
+    }
 
     const codeResponseText = codeResult.response.text();
     const finalCode = cleanResponse(codeResponseText);

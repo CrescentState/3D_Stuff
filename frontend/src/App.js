@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 import './App.css'; // Assuming you have some basic styles in App.css
 
 
@@ -8,45 +9,40 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
 
   const handleGenerate = async () => {
+    if (!prompt.trim()) {
+      alert('Please enter a scene description');
+      return;
+    }
+
     setIsLoading(true);
     setSceneCode('');
 
-    // TODO: replace this with actual API call to backend
-    setTimeout(() => {
-      const fakeResponse = `
-  <html>
-    <head>
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    </head>
-    <body style="margin:0">
-      <script>
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
+    try {
+      const response = await axios.post('http://localhost:5000/api/generate', {
+        prompt: prompt.trim()
+      });
 
-        const geometry = new THREE.BoxGeometry();
-        const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-        const cube = new THREE.Mesh(geometry, material);
-        scene.add(cube);
-        camera.position.z = 5;
+      const htmlTemplate = `
+        <html>
+          <head>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
+          </head>
+          <body style="margin:0">
+            <script>
+              ${response.data.code}
+            </script>
+          </body>
+        </html>
+      `;
 
-        function animate() {
-          requestAnimationFrame(animate);
-          cube.rotation.x += 0.01;
-          cube.rotation.y += 0.01;
-          renderer.render(scene, camera);
-        }
-        animate();
-      </script>
-    </body>
-  </html>
-`;
-
-      setSceneCode(fakeResponse);
+      setSceneCode(htmlTemplate);
+    } catch (error) {
+      console.error('Error generating scene:', error);
+      alert('Failed to generate scene. Please try again.');
+    } finally {
       setIsLoading(false);
-    }, 2000);
+    }
   };
 
   return (
