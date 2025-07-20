@@ -117,16 +117,63 @@ app.post('/api/generate', async (req, res) => {
     const sceneDescriptionText = jsonResult.response.text();
     const cleanedText = cleanResponse(sceneDescriptionText);
     
+    let sceneDescription;
     try {
-      const sceneDescription = JSON.parse(cleanedText);
+      // First clean the response thoroughly
+      let parseText = cleanedText
+        .replace(/^```(json)?\s*/g, '')
+        .replace(/```$/g, '')
+        .replace(/^```\s*/g, '')
+        // Evaluate Math expressions safely
+        .replace(/Math\.PI\s*\/\s*(\d+)/g, (match, divisor) => {
+          return (Math.PI / parseInt(divisor)).toString();
+        })
+        .replace(/-?Math\.PI\b/g, (match) => {
+          return match.startsWith('-') ? '-3.14159265359' : '3.14159265359';
+        })
+        // Clean up any invalid characters
+        .replace(/[^\x20-\x7E\r\n]/g, '')
+        // Handle common JSON formatting issues
+        .replace(/(\w+)\s*:\s*([^,"}\]]+)(?=[,}\]])/g, '$1:"$2"')
+        .trim();
+
+      try {
+        // First attempt parsing as-is
+        sceneDescription = JSON.parse(parseText);
+      } catch (initialError) {
+        // If initial parse fails, try more flexible approach
+        parseText = parseText
+          .replace(/'/g, '"')
+          .replace(/(\w+)\s*:\s*([^,"}\]]+)/g, '$1:"$2"');
+
+        sceneDescription = JSON.parse(parseText, (key, value) => {
+          if (typeof value === 'string') {
+            // Convert numeric strings to numbers
+            if (!isNaN(value)) return parseFloat(value);
+            // Clean up string values
+            return value.replace(/"/g, '');
+          }
+          return value;
+        });
+      }
+      
+      // Validate the parsed object
+      if (!sceneDescription || typeof sceneDescription !== 'object') {
+        throw new Error('Empty or invalid JSON response');
+      }
+      
       console.log('Step 1 complete. Received JSON:', sceneDescription);
-    } catch (err) {
-      console.error('Failed to parse JSON response:', cleanedText);
-      throw new Error('The AI response could not be parsed as valid JSON. Please try again.');
+    } catch (error) {
+      console.error('JSON parse failed:', {
+        originalText: cleanedText,
+        error: error
+      });
+      throw new Error('The AI response could not be parsed as valid JSON. Please try a different prompt.');
     }
 
-
     // --- STEP 2: Generate Three.js code from the structured JSON ---
+    // Store sceneDescription in a local constant for the template string
+    const sceneDesc = sceneDescription;
     console.log('Step 2: Generating Three.js code...');
     const promptToCode = `
       You are an expert Three.js developer. Your task is to write a complete, self-contained Three.js script based on a JSON scene description.
